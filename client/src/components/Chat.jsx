@@ -10,7 +10,6 @@ export default function Chat({ username }) {
     useEffect(() => {
         if (!socket) return;
 
-        // Listen for incoming messages
         const handleMessage = (msg) => {
             setMessages((prev) => [...prev, msg]);
         };
@@ -22,66 +21,78 @@ export default function Chat({ username }) {
         };
     }, [socket]);
 
-    // Auto-scroll to bottom using ref
     useEffect(() => {
-        messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
+        messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
     }, [messages]);
 
     const sendMessage = (e) => {
         e.preventDefault();
         if (input.trim() && socket) {
-            const msgData = {
+            const msg = {
                 id: Date.now(),
                 user: username,
-                text: input.trim(),
-                timestamp: new Date().toLocaleTimeString() // Simple time for now
+                text: input,
+                time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
             };
-
-            // Emit to server
-            socket.emit('chat:message', msgData);
-
-            // Optimistically add to local UI? 
-            // Usually better to wait for broadcast or just add it if server echoes excluding sender
-            // For this simple app, we'll assume server broadcasts to everyone including sender
-            // setMessages((prev) => [...prev, msgData]);
-
+            socket.emit('chat:message', msg);
             setInput('');
         }
     };
 
     return (
-        <div className="chat-container">
-            <div className="chat-header">
-                <h3>LAN Chat</h3>
-                <span className="online-badge">Online</span>
-            </div>
-
-            <div className="chat-messages">
-                {messages.map((msg) => (
-                    <div
-                        key={msg.id}
-                        className={`message ${msg.user === username ? 'own-message' : 'other-message'}`}
-                    >
-                        <div className="message-meta">
-                            <span className="message-user">{msg.user}</span>
-                            <span className="message-time">{msg.timestamp}</span>
-                        </div>
-                        <div className="message-bubble">
-                            {msg.text}
-                        </div>
+        <div className="chat-container glass-panel" style={{ display: 'flex', flexDirection: 'column', height: '100%', padding: '20px' }}>
+            <div className="messages-area" style={{ flex: 1, overflowY: 'auto', marginBottom: '20px', paddingRight: '10px' }}>
+                {messages.length === 0 ? (
+                    <div style={{ textAlign: 'center', color: 'var(--text-dim)', marginTop: '50px' }}>
+                        <p style={{ fontFamily: 'var(--font-display)', fontSize: '1.2rem' }}>NO TRANSMISSIONS</p>
+                        <p style={{ fontSize: '0.9rem' }}>System status: <span style={{ color: 'var(--neon-green)' }}>ONLINE</span></p>
                     </div>
-                ))}
+                ) : (
+                    messages.map((msg, index) => {
+                        const isMe = msg.user === username;
+                        return (
+                            <div
+                                key={index}
+                                style={{
+                                    display: 'flex',
+                                    flexDirection: 'column',
+                                    alignItems: isMe ? 'flex-end' : 'flex-start',
+                                    marginBottom: '15px',
+                                    animation: 'fadeIn 0.3s ease'
+                                }}
+                            >
+                                <div style={{ fontSize: '0.8rem', color: 'var(--text-dim)', marginBottom: '4px' }}>
+                                    {msg.user} <span style={{ opacity: 0.5 }}>• {msg.time}</span>
+                                </div>
+                                <div style={{
+                                    background: isMe ? 'linear-gradient(135deg, var(--neon-blue), var(--neon-purple))' : 'rgba(255,255,255,0.05)',
+                                    color: isMe ? 'white' : 'var(--text-main)',
+                                    padding: '10px 15px',
+                                    borderRadius: isMe ? '12px 12px 0 12px' : '12px 12px 12px 0',
+                                    maxWidth: '70%',
+                                    boxShadow: isMe ? '0 0 15px rgba(188, 19, 254, 0.3)' : 'none',
+                                    border: isMe ? 'none' : '1px solid var(--glass-border)'
+                                }}>
+                                    {msg.text}
+                                </div>
+                            </div>
+                        );
+                    })
+                )}
                 <div ref={messagesEndRef} />
             </div>
 
-            <form className="chat-input-area" onSubmit={sendMessage}>
+            <form onSubmit={sendMessage} style={{ display: 'flex', gap: '10px' }}>
                 <input
                     type="text"
                     value={input}
                     onChange={(e) => setInput(e.target.value)}
                     placeholder="Type a message..."
+                    style={{ flex: 1 }}
                 />
-                <button type="submit">Send</button>
+                <button type="submit" className="btn-neon">
+                    Send
+                </button>
             </form>
         </div>
     );

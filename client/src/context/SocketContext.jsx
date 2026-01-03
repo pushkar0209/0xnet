@@ -14,7 +14,8 @@ export const SocketProvider = ({ children }) => {
     useEffect(() => {
         // In dev, Vite proxies /socket.io to localhost:3000
         // In prod/LAN, we might need to specify the host explicitly if serving separately
-        const newSocket = io('/');
+        const BACKEND_URL = `http://${window.location.hostname}:3000`;
+        const newSocket = io(BACKEND_URL);
 
         newSocket.on('connect', () => {
             console.log('Socket connected:', newSocket.id);

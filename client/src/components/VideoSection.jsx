@@ -2,6 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import VideoPlayer from './VideoPlayer';
 import LiveStream from './LiveStream';
 import { useSocket } from '../context/SocketContext';
+import { API_BASE_URL } from '../App';
 
 export default function VideoSection() {
     const { socket } = useSocket();
@@ -32,16 +33,35 @@ export default function VideoSection() {
             console.log("Received remote source change:", video);
             setSelectedVideo(video);
             setVideoOptions({
-                autoplay: false,
+                autoplay: true, // Auto play on remote change
                 controls: true,
                 responsive: true,
                 fluid: true,
                 sources: [{
-                    src: `http://localhost:3000${video.url}`,
+                    src: `${API_BASE_URL}${video.url}`,
                     type: 'video/mp4'
                 }]
             });
         };
+
+        // SYNC: Get initial state on connection
+        socket.emit('video:getState', (state) => {
+            if (state && state.url) {
+                const videoName = state.url.split('/').pop();
+                setSelectedVideo({ name: videoName, url: state.url.replace('/uploads/', '') });
+
+                setVideoOptions({
+                    autoplay: state.isPlaying,
+                    controls: true,
+                    responsive: true,
+                    fluid: true,
+                    sources: [{
+                        src: `${API_BASE_URL}${state.url}`,
+                        type: 'video/mp4'
+                    }]
+                });
+            }
+        });
 
         socket.on('video:changeSource', onChangeSource);
 
@@ -52,23 +72,19 @@ export default function VideoSection() {
 
     const fetchVideos = async () => {
         try {
-            const response = await fetch('http://localhost:3000/videos');
+            const response = await fetch(`${API_BASE_URL}/videos`);
             if (response.ok) {
                 const videos = await response.json();
                 setVideoList(videos);
 
-                // Set default video if available and none selected
                 if (videos.length > 0 && !selectedVideo) {
-                    // Prefer sample.mp4 if it exists for backward compat looks, or just first one
                     const defaultVid = videos.find(v => v.name === 'sample.mp4') || videos[0];
-                    // Don't emit for initial load, just set local
                     handleSelectVideo(defaultVid, false);
                 } else if (videos.length === 0) {
-                    // Fallback to hardcoded sample if list empty (e.g. fresh install)
                     setVideoOptions(prev => ({
                         ...prev,
                         sources: [{
-                            src: 'http://localhost:3000/sample.mp4',
+                            src: `${API_BASE_URL}/sample.mp4`,
                             type: 'video/mp4'
                         }]
                     }));
@@ -80,7 +96,7 @@ export default function VideoSection() {
             setVideoOptions(prev => ({
                 ...prev,
                 sources: [{
-                    src: 'http://localhost:3000/sample.mp4',
+                    src: `${API_BASE_URL}/sample.mp4`,
                     type: 'video/mp4'
                 }]
             }));
@@ -95,8 +111,8 @@ export default function VideoSection() {
             responsive: true,
             fluid: true,
             sources: [{
-                src: `http://localhost:3000${video.url}`,
-                type: 'video/mp4' // Assuming mp4 for simplicity, or we could detect extension
+                src: `${API_BASE_URL}${video.url}`,
+                type: 'video/mp4'
             }]
         });
 
@@ -115,21 +131,18 @@ export default function VideoSection() {
         formData.append('video', file);
 
         try {
-            const response = await fetch('http://localhost:3000/upload', {
+            const response = await fetch(`${API_BASE_URL}/upload`, {
                 method: 'POST',
                 body: formData
             });
 
             if (response.ok) {
                 const data = await response.json();
-                // Refresh list
                 await fetchVideos();
-                // Select the new video and emit change
                 handleSelectVideo({
                     name: data.filename,
                     url: data.path
                 });
-                // Clear input
                 if (fileInputRef.current) fileInputRef.current.value = '';
             } else {
                 alert('Upload failed');
@@ -147,71 +160,88 @@ export default function VideoSection() {
     };
 
     return (
-        <div className="video-section">
-            <div className="video-controls">
+        <div className="video-section" style={{ height: '100%', display: 'flex', flexDirection: 'column' }}>
+            {/* Control Bar */}
+            <div className="glass-panel" style={{ padding: '15px', marginBottom: '20px', display: 'flex', gap: '15px', alignItems: 'center' }}>
+                <span style={{ fontFamily: 'var(--font-display)', color: 'var(--neon-cyan)', marginRight: '10px' }}>MODE SELECT:</span>
                 <button
-                    className={mode === 'stored' ? 'active' : ''}
+                    className={`btn-neon ${mode === 'stored' ? 'active' : ''}`}
                     onClick={() => setMode('stored')}
                 >
                     Stored Video
                 </button>
                 <button
-                    className={mode === 'broadcast' ? 'active' : ''}
+                    className={`btn-neon ${mode === 'broadcast' ? 'active' : ''}`}
                     onClick={() => setMode('broadcast')}
                 >
-                    Broadcast Camera
+                    Broadcast
                 </button>
                 <button
-                    className={mode === 'view' ? 'active' : ''}
+                    className={`btn-neon ${mode === 'view' ? 'active' : ''}`}
                     onClick={() => setMode('view')}
                 >
                     Join Stream
                 </button>
             </div>
 
-            <div className="player-container">
-                <div style={{ display: mode === 'stored' ? 'block' : 'none', height: '100%' }}>
+            <div className="player-container" style={{ flex: 1, position: 'relative' }}>
+                <div style={{ display: mode === 'stored' ? 'flex' : 'none', flexDirection: 'column', height: '100%', gap: '20px' }}>
 
-                    {/* Upload and List UI */}
-                    <div className="stored-video-ui" style={{ marginBottom: '1rem', padding: '1rem', background: 'rgba(255,255,255,0.05)', borderRadius: '8px' }}>
-                        <div style={{ display: 'flex', gap: '10px', alignItems: 'center', marginBottom: '10px' }}>
-                            <input
-                                type="file"
-                                accept="video/*"
-                                onChange={handleUpload}
-                                ref={fileInputRef}
-                                disabled={uploading}
-                                style={{ color: 'white' }}
-                            />
-                            {uploading && <span style={{ color: '#00ff88' }}>Uploading...</span>}
-                        </div>
-
-                        <div className="video-list" style={{ display: 'flex', gap: '10px', overflowX: 'auto', paddingBottom: '10px' }}>
-                            {videoList.map((vid, idx) => (
-                                <button
-                                    key={idx}
-                                    onClick={() => handleSelectVideo(vid)}
-                                    style={{
-                                        background: selectedVideo === vid ? '#7000ff' : '#333',
-                                        color: 'white',
-                                        border: 'none',
-                                        padding: '5px 10px',
-                                        borderRadius: '4px',
-                                        cursor: 'pointer',
-                                        whiteSpace: 'nowrap'
-                                    }}
-                                >
-                                    {vid.name.length > 20 ? vid.name.substring(0, 17) + '...' : vid.name}
-                                </button>
-                            ))}
+                    {/* Video Player Box */}
+                    <div className="glass-panel" style={{ flex: 1, padding: '20px', display: 'flex', flexDirection: 'column' }}>
+                        <div style={{ flex: 1, borderRadius: '8px', overflow: 'hidden', border: '1px solid var(--glass-border)' }}>
+                            <VideoPlayer options={videoOptions} isActive={mode === 'stored'} />
                         </div>
                     </div>
 
-                    <VideoPlayer options={videoOptions} isActive={mode === 'stored'} />
+                    {/* Media Library Panel */}
+                    <div className="glass-panel" style={{ padding: '20px' }}>
+                        <h4 style={{ color: 'var(--text-dim)', marginBottom: '15px', fontFamily: 'var(--font-display)' }}>MEDIA LIBRARY</h4>
+
+                        <div style={{ display: 'flex', gap: '20px', alignItems: 'center', marginBottom: '15px' }}>
+                            <div className="upload-btn-wrapper" style={{ position: 'relative', overflow: 'hidden', display: 'inline-block' }}>
+                                <button className="btn-neon" style={{ fontSize: '0.8rem' }}>+ UPLOAD VIDEO</button>
+                                <input
+                                    type="file"
+                                    name="myfile"
+                                    ref={fileInputRef}
+                                    onChange={handleUpload}
+                                    accept="video/*"
+                                    disabled={uploading}
+                                    style={{ fontSize: '100px', position: 'absolute', left: 0, top: 0, opacity: 0, cursor: 'pointer' }}
+                                />
+                            </div>
+                            {uploading && <span style={{ color: 'var(--neon-green)', fontSize: '0.9rem' }} className="blink">UPLOADING...</span>}
+                        </div>
+
+                        <div className="video-list" style={{ display: 'flex', gap: '10px', overflowX: 'auto', paddingBottom: '5px' }}>
+                            {videoList.map((vid, idx) => (
+                                <div
+                                    key={idx}
+                                    onClick={() => handleSelectVideo(vid)}
+                                    style={{
+                                        background: selectedVideo === vid ? 'linear-gradient(135deg, var(--neon-blue), var(--neon-purple))' : 'rgba(255,255,255,0.05)',
+                                        color: selectedVideo === vid ? 'white' : 'var(--text-dim)',
+                                        border: selectedVideo === vid ? 'none' : '1px solid var(--glass-border)',
+                                        padding: '10px 20px',
+                                        borderRadius: '8px',
+                                        cursor: 'pointer',
+                                        whiteSpace: 'nowrap',
+                                        transition: 'all 0.3s'
+                                    }}
+                                >
+                                    <span style={{ marginRight: '8px' }}>▶</span>
+                                    {vid.name.length > 20 ? vid.name.substring(0, 17) + '...' : vid.name}
+                                </div>
+                            ))}
+                        </div>
+                    </div>
                 </div>
 
                 {(mode === 'broadcast' || mode === 'view') && (
-                    <LiveStream mode={mode} onExit={handleExitLive} />
+                    <div className="glass-panel" style={{ height: '100%', padding: '20px' }}>
+                        <LiveStream mode={mode} onExit={handleExitLive} />
+                    </div>
                 )}
             </div>
         </div>

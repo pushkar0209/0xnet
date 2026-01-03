@@ -142,8 +142,8 @@ export default function VideoPlayer({ options, isActive }) {
     }, []);
 
     return (
-        <div data-vjs-player>
-            <div ref={videoRef} />
+        <div data-vjs-player style={{ width: '100%', height: '100%' }}>
+            <div ref={videoRef} style={{ width: '100%', height: '100%' }} />
         </div>
     );
 }

@@ -4,24 +4,17 @@ import { useSocket } from '../context/SocketContext';
 const ICE_SERVERS = {
     iceServers: [
         { urls: 'stun:stun.l.google.com:19302' },
-        // On LAN, STUN might not even be needed if we use mDNS or direct IP, 
-        // but good to have for robustness.
     ]
 };
-
-
 
 export default function LiveStream({ mode, onExit }) {
     const { socket } = useSocket();
     const [status, setStatus] = useState('Initializing...');
     const localVideoRef = useRef(null);
-    const remoteVideoRef = useRef(null); // Simple 1-viewer support for now in view mode
+    const remoteVideoRef = useRef(null);
     const [localStream, setLocalStream] = useState(null);
+    const peersRef = useRef({});
 
-    // Refs for state that shouldn't trigger re-renders
-    const peersRef = useRef({}); // { socketId: RTCPeerConnection }
-
-    // --- Host Logic: Capture Camera ---
     useEffect(() => {
         if (mode === 'broadcast') {
             const startCamera = async () => {
@@ -31,39 +24,34 @@ export default function LiveStream({ mode, onExit }) {
                     if (localVideoRef.current) {
                         localVideoRef.current.srcObject = stream;
                     }
-                    setStatus('Live - Waiting for viewers...');
+                    setStatus('LIVE BROADCAST ACTIVE');
                     socket.emit('join-stream', 'default-room');
                 } catch (err) {
                     console.error("Camera Error:", err);
-                    setStatus('Error accessing camera');
+                    setStatus('CAMERA ACCESS DENIED');
                 }
             };
             startCamera();
         } else if (mode === 'view') {
-            setStatus('Connecting to stream...');
+            setStatus('ESTABLISHING UPLINK...');
             socket.emit('join-stream', 'default-room');
         }
 
         return () => {
-            // Cleanup on unmount
             if (localStream) {
                 localStream.getTracks().forEach(track => track.stop());
             }
-            // Close all peers
             Object.values(peersRef.current).forEach(p => p.close());
             peersRef.current = {};
         };
     }, [mode, socket]);
 
-    // --- WebRTC Socket Events ---
     useEffect(() => {
         if (!socket) return;
 
-        // When a new user joins, Host instigates a connection
         const handleUserConnected = (userId) => {
             console.log("User connected:", userId);
             if (mode === 'broadcast' && localStream) {
-                // Initiator: true
                 createPeer(userId, localStream, true);
             }
         };
@@ -74,16 +62,12 @@ export default function LiveStream({ mode, onExit }) {
                 peersRef.current[userId].close();
                 delete peersRef.current[userId];
             }
-            // Optional: If viewer, and host disconnected, update UI
         };
 
         const handleSignal = async ({ sender, signal }) => {
-            // If we don't have a peer yet, create one (Responder)
             if (!peersRef.current[sender]) {
-                // If we are viewer, we are receiving an offer from host usually
                 createPeer(sender, localStream, false);
             }
-
             const peer = peersRef.current[sender];
 
             try {
@@ -113,17 +97,14 @@ export default function LiveStream({ mode, onExit }) {
         };
     }, [socket, mode, localStream]);
 
-    // --- Peer Helper ---
     function createPeer(targetId, stream, initiator) {
         const peer = new RTCPeerConnection(ICE_SERVERS);
         peersRef.current[targetId] = peer;
 
-        // Add local tracks if available
         if (stream) {
             stream.getTracks().forEach(track => peer.addTrack(track, stream));
         }
 
-        // ICE Candidates
         peer.onicecandidate = (event) => {
             if (event.candidate) {
                 socket.emit('signal', {
@@ -133,16 +114,13 @@ export default function LiveStream({ mode, onExit }) {
             }
         };
 
-        // Incoming Stream
         peer.ontrack = (event) => {
-            console.log("Received remote track from", targetId);
             if (remoteVideoRef.current) {
                 remoteVideoRef.current.srcObject = event.streams[0];
             }
-            if (mode === 'view') setStatus('Connected to Stream');
+            if (mode === 'view') setStatus('SIGNAL LOCKED');
         };
 
-        // Negotiation (Only needed for initiator usually, but good to have logic)
         if (initiator) {
             peer.onnegotiationneeded = async () => {
                 try {
@@ -162,27 +140,34 @@ export default function LiveStream({ mode, onExit }) {
     }
 
     return (
-        <div className="live-stream-container">
-            <div className="stream-header">
-                <button onClick={onExit} style={{ background: 'rgba(255,255,255,0.1)', border: 'none', borderRadius: '8px', color: 'white', padding: '8px 16px' }}>
-                    &larr; Exit
+        <div className="live-stream-container" style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
+            <div className="stream-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '15px' }}>
+                <button onClick={onExit} className="btn-neon" style={{ minWidth: '80px' }}>
+                    &larr; BACK
                 </button>
-                <div className="stream-status">
-                    <div className="pulse-dot"></div>
-                    {status}
+                <div className="stream-status" style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                    <div className="pulse-dot" style={{ width: '10px', height: '10px', borderRadius: '50%', background: 'var(--neon-green)', boxShadow: '0 0 10px var(--neon-green)' }}></div>
+                    <span style={{ fontFamily: 'var(--font-display)', letterSpacing: '2px', color: 'var(--neon-cyan)' }}>{status}</span>
                 </div>
             </div>
 
-            <div className="video-area">
+            <div className="video-area" style={{ flex: 1, position: 'relative', borderRadius: '12px', overflow: 'hidden', background: '#000', border: '1px solid var(--neon-cyan)' }}>
                 {mode === 'broadcast' && (
-                    <video ref={localVideoRef} autoPlay muted playsInline className="main-video" style={{ transform: 'scaleX(-1)' }} />
+                    <video ref={localVideoRef} autoPlay muted playsInline className="main-video" style={{ width: '100%', height: '100%', objectFit: 'cover', transform: 'scaleX(-1)' }} />
                 )}
                 {mode === 'view' && (
-                    <video ref={remoteVideoRef} autoPlay playsInline className="main-video" />
+                    <video ref={remoteVideoRef} autoPlay playsInline className="main-video" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
                 )}
-            </div>
 
-            {/* Optional: Overlay for self-view when viewing? No, keeps it simple */}
+                {/* HUD Elements */}
+                <div style={{ position: 'absolute', bottom: '20px', left: '20px', fontFamily: 'var(--font-display)', color: 'rgba(255,255,255,0.7)', fontSize: '0.8rem' }}>
+                    REC • [ {new Date().toLocaleTimeString()} ]
+                </div>
+
+                <div style={{ position: 'absolute', top: '20px', right: '20px', border: '1px solid rgba(255,255,255,0.3)', padding: '5px 10px', borderRadius: '4px', background: 'rgba(0,0,0,0.5)' }}>
+                    <span style={{ color: 'var(--neon-green)' }}>HD</span> 1080p
+                </div>
+            </div>
         </div>
     );
 }

@@ -87,6 +87,14 @@ app.get('/', (req, res) => {
     res.send('0Xnet Server is Running');
 });
 
+// Global Video State
+let currentVideoState = {
+    url: null,
+    isPlaying: false,
+    timestamp: 0,
+    lastUpdated: Date.now()
+};
+
 // Socket.io Connection
 io.on('connection', (socket) => {
     console.log('A user connected:', socket.id);
@@ -125,21 +133,51 @@ io.on('connection', (socket) => {
         }
     });
 
-    // Video Synchronization
+    // Video State Tracking is now global
+    socket.on('video:getState', (callback) => {
+        // Calculate estimated current time based on lag if playing
+        let estimatedTime = currentVideoState.timestamp;
+        if (currentVideoState.isPlaying) {
+            const diff = (Date.now() - currentVideoState.lastUpdated) / 1000;
+            estimatedTime += diff;
+        }
+        callback({
+            ...currentVideoState,
+            timestamp: estimatedTime
+        });
+    });
+
     socket.on('video:changeSource', (videoData) => {
+        currentVideoState = {
+            url: videoData.url,
+            isPlaying: true, // Auto-play usually happens on change
+            timestamp: 0,
+            lastUpdated: Date.now()
+        };
         // Broadcast the new video source to all other clients
         socket.broadcast.emit('video:changeSource', videoData);
     });
 
     socket.on('video:play', (time) => {
+        currentVideoState.isPlaying = true;
+        currentVideoState.timestamp = time;
+        currentVideoState.lastUpdated = Date.now();
         socket.broadcast.emit('video:play', time);
     });
 
-    socket.on('video:pause', () => {
+    socket.on('video:pause', (time) => {
+        // Client should send time on pause for better sync
+        currentVideoState.isPlaying = false;
+        if (typeof time === 'number') {
+            currentVideoState.timestamp = time;
+        }
+        currentVideoState.lastUpdated = Date.now();
         socket.broadcast.emit('video:pause');
     });
 
     socket.on('video:seek', (time) => {
+        currentVideoState.timestamp = time;
+        currentVideoState.lastUpdated = Date.now();
         socket.broadcast.emit('video:seek', time);
     });
 });
